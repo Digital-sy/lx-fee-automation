@@ -353,8 +353,10 @@ async def upload_files(excel_files: List[str], month: str, skip_discard: bool = 
                 return False
 
             # 逐个上传
+            results = []
             for i, filepath in enumerate(excel_files, start=1):
                 ok = await upload_single_file(page, filepath, i, total)
+                results.append(ok)
                 if ok:
                     success_count += 1
                 else:
@@ -367,6 +369,32 @@ async def upload_files(excel_files: List[str], month: str, skip_discard: bool = 
         finally:
             await context.close()
             await browser.close()
+
+    # ── 重试失败的文件（最多2次）──
+    if success_count < total:
+        failed_files = [f for f, ok in zip(excel_files, results) if not ok]
+        logger.info(f"\n🔄 开始重试 {len(failed_files)} 个失败文件...")
+        
+        for retry_round in range(2):
+            if not failed_files:
+                break
+            logger.info(f"  第 {retry_round + 1} 次重试，共 {len(failed_files)} 个文件")
+            still_failed = []
+            for i, filepath in enumerate(failed_files, 1):
+                await asyncio.sleep(5)
+                ok = await upload_single_file(page, filepath, i, len(failed_files))
+                if ok:
+                    success_count += 1
+                    logger.info(f"  ✅ 重试成功: {os.path.basename(filepath)}")
+                else:
+                    still_failed.append(filepath)
+                    logger.warning(f"  ⚠️  重试失败: {os.path.basename(filepath)}")
+            failed_files = still_failed
+
+        if failed_files:
+            logger.error(f"❌ 以下文件重试后仍失败:")
+            for f in failed_files:
+                logger.error(f"   {os.path.basename(f)}")
 
     logger.info("")
     logger.info("=" * 60)

@@ -54,13 +54,13 @@ def month_to_date_range(month: str):
 # ─────────────────────────────────────────────────────────────────────────────
 # 步骤 A：拉取利润报表（仅每日模式需要）
 # ─────────────────────────────────────────────────────────────────────────────
-def step_fetch(start_date: str, end_date: str) -> bool:
+async def step_fetch(start_date: str, end_date: str) -> bool:
     logger.info("=" * 70)
     logger.info(f"步骤 1/4  拉取利润报表数据  [{start_date} ~ {end_date}]")
     logger.info("=" * 70)
     try:
         import fetch_profit_report_msku_daily as fetcher
-        asyncio.run(fetcher.main(start_date=start_date, end_date=end_date))
+        await fetcher.main(start_date=start_date, end_date=end_date, monthly=True)
         logger.info("✅ 步骤 1 完成")
         return True
     except Exception as e:
@@ -153,9 +153,9 @@ async def main(month: str, is_monthly_correction: bool, skip_fetch: bool):
         logger.info("⏭️  跳过步骤 1（月度修正模式，数据已在库中）")
         results['fetch'] = 'skipped'
     else:
-        # 每日模式：只拉取昨天的数据（增量）
+        # 每日模式：拉取本月1号到昨天（monthly模式，3天一批）
         yesterday = (date.today() - __import__('datetime').timedelta(days=1)).strftime('%Y-%m-%d')
-        results['fetch'] = step_fetch(start_date=yesterday, end_date=yesterday)
+        results['fetch'] = await step_fetch(start_date=start_date, end_date=yesterday)
         if not results['fetch']:
             logger.error("⛔  步骤 1 失败，中止")
             _summary(results, start_time, month)

@@ -935,7 +935,7 @@ async def main(start_date: str = None, end_date: str = None, monthly: bool = Fal
     # ── 按月模式：每5天一批拉取 ──────────────────────────────────────────────
     if monthly:
         logger.info("📅 按月分批模式：每次拉取5天，分批写入")
-        BATCH_DAYS = 3
+        BATCH_DAYS = 1
         current = month_start
         batch_num = 0
         total_records_monthly = 0
