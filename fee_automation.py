@@ -224,16 +224,27 @@ if __name__ == '__main__':
 
     # 月度修正模式默认用上个月
     if args.monthly:
-        target_month = args.month or get_last_month()
+        months_to_run = [args.month or get_last_month()]
+    elif args.month:
+        months_to_run = [args.month]
     else:
-        target_month = args.month or get_current_month()
+        # 默认逻辑：每月1-7号同时更新上月和本月，8号起只更新本月
+        today = date.today()
+        if today.day <= 7:
+            months_to_run = [get_last_month(), get_current_month()]
+            logger.info(f"📅 双月模式：{months_to_run[0]} + {months_to_run[1]}")
+        else:
+            months_to_run = [get_current_month()]
 
     try:
-        asyncio.run(main(
-            month=target_month,
-            is_monthly_correction=args.monthly,
-            skip_fetch=args.skip_fetch,
-        ))
+        for target_month in months_to_run:
+            logger.info(f"\n{'='*60}\n开始处理月份：{target_month}\n{'='*60}")
+            asyncio.run(main(
+                month=target_month,
+                is_monthly_correction=args.monthly,
+                skip_fetch=args.skip_fetch,
+            ))
+            args.skip_fetch = False  # 第二个月不跳过拉取
     except KeyboardInterrupt:
         logger.warning("⚠️  用户中断")
         sys.exit(1)
