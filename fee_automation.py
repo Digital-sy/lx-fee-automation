@@ -30,6 +30,72 @@ from common import get_logger
 
 logger = get_logger('fee_automation')
 
+FEISHU_USER_ID = 'ou_45d24eddffa044503caf29d6c8a2e003'  # 刘宗霖
+
+def notify_feishu(results: dict, month: str, elapsed: int, error_msg: str = None):
+    """发送任务完成通知到飞书（直接调用API，不依赖feishu-dev-bot）"""
+    try:
+        import requests, json
+        from common.config import settings
+
+        # 获取飞书token
+        token_resp = requests.post(
+            'https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal',
+            json={'app_id': settings.FEISHU_APP_ID, 'app_secret': settings.FEISHU_APP_SECRET},
+            timeout=10
+        ).json()
+        token = token_resp.get('tenant_access_token')
+        if not token:
+            logger.warning(f"⚠️  获取飞书token失败: {token_resp}")
+            return
+
+        status_map = {True: '✅ 成功', False: '❌ 失败', 'skipped': '⏭️ 跳过'}
+        all_success = all(v is not False for v in results.values())
+        title = f"{'✅ 费用单同步完成' if all_success else '❌ 费用单同步失败'} | {month}"
+
+        step_text = (
+            f"**步骤1 拉取利润报表：** {status_map.get(results.get('fetch'), '—')}\n"
+            f"**步骤2 更新计算字段：** {status_map.get(results.get('update'), '—')}\n"
+            f"**步骤3 生成Excel：** {status_map.get(results.get('generate'), '—')}\n"
+            f"**步骤4 上传领星：** {status_map.get(results.get('upload'), '—')}\n"
+            f"**总耗时：** {elapsed//60}分{elapsed%60}秒"
+        )
+
+        card = {
+            "config": {"wide_screen_mode": True},
+            "header": {
+                "title": {"tag": "plain_text", "content": title},
+                "template": "green" if all_success else "red"
+            },
+            "elements": [
+                {"tag": "div", "text": {"tag": "lark_md", "content": step_text}}
+            ]
+        }
+
+        if error_msg:
+            card["elements"].append({
+                "tag": "div",
+                "text": {"tag": "lark_md", "content": f"**错误信息：**\n{error_msg}"}
+            })
+
+        resp = requests.post(
+            'https://open.feishu.cn/open-apis/im/v1/messages?receive_id_type=open_id',
+            headers={'Authorization': f'Bearer {token}', 'Content-Type': 'application/json'},
+            json={
+                'receive_id': FEISHU_USER_ID,
+                'msg_type': 'interactive',
+                'content': json.dumps(card, ensure_ascii=False)
+            },
+            timeout=15
+        ).json()
+
+        if resp.get('code') == 0:
+            logger.info("✅ 飞书通知已发送")
+        else:
+            logger.warning(f"⚠️  飞书通知发送失败: {resp.get('msg')}")
+    except Exception as e:
+        logger.warning(f"⚠️  飞书通知发送失败: {e}")
+
 OUTPUT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'fee_excel_output')
 
 
@@ -192,17 +258,19 @@ async def main(month: str, is_monthly_correction: bool, skip_fetch: bool):
 
 
 def _summary(results: dict, start_time: datetime, month: str):
-    elapsed = (datetime.now() - start_time).total_seconds()
+    elapsed = int((datetime.now() - start_time).total_seconds())
     s = {True: '✅ 成功', False: '❌ 失败', 'skipped': '⏭️  跳过'}
     logger.info("")
     logger.info("=" * 70)
-    logger.info(f"📋  任务汇总  |  月份：{month}  |  耗时：{elapsed:.0f}秒")
+    logger.info(f"📋  任务汇总  |  月份：{month}  |  耗时：{elapsed}秒")
     logger.info("=" * 70)
     logger.info(f"  步骤 1 - 拉取利润报表 : {s.get(results.get('fetch'), '—')}")
     logger.info(f"  步骤 2 - 更新计算字段 : {s.get(results.get('update'), '—')}")
     logger.info(f"  步骤 3 - 生成Excel   : {s.get(results.get('generate'), '—')}")
     logger.info(f"  步骤 4 - 上传领星    : {s.get(results.get('upload'), '—')}")
     logger.info("=" * 70)
+    # 发送飞书通知
+    notify_feishu(results, month, elapsed)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
