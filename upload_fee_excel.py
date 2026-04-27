@@ -145,6 +145,22 @@ async def navigate_to_fee_mgmt(page) -> bool:
     for btn_text in ['导入费用', 'Import Expense']:
         try:
             await page.wait_for_selector(f'button:has-text("{btn_text}")', timeout=30_000)
+            # 页面加载完成后，立即用JS隐藏公告弹窗
+            await page.evaluate('''() => {
+                const hide = () => {
+                    document.querySelectorAll(
+                        ".auto-dialog, .auto-height, [class*=auto-dialog]"
+                    ).forEach(el => {
+                        el.style.display = "none";
+                        el.style.pointerEvents = "none";
+                        el.style.zIndex = "-9999";
+                    });
+                };
+                hide();
+                // 持续监听并隐藏
+                new MutationObserver(hide).observe(document.body, {childList: true, subtree: true});
+            }''')
+            await asyncio.sleep(0.5)
             logger.info(f"✅ 费用管理页面加载完成（按钮: {btn_text}）")
             return True
         except Exception:
@@ -186,7 +202,29 @@ async def upload_single_file(page, filepath: str, file_index: int, total: int) -
     filename = os.path.basename(filepath)
     logger.info(f"📤 上传第 {file_index}/{total} 个文件: {filename}")
     try:
-        # 1. 点击「导入费用」按钮打开弹窗（中英文兼容）
+        # 0. 关闭可能存在的公告弹窗，关闭后重新确认在费用管理页
+        try:
+            # 检查是否有公告弹窗iframe
+            iframe = page.locator('#que-iframe')
+            if await iframe.count() > 0 and await iframe.is_visible(timeout=2000):
+                logger.info("  检测到公告弹窗，尝试关闭...")
+                # 点击弹窗右上角X按钮
+                close_btn = page.locator('.auto-dialog .el-dialog__headerbtn, .auto-height .el-dialog__headerbtn')
+                if await close_btn.count() > 0:
+                    await close_btn.first.click()
+                else:
+                    await page.keyboard.press('Escape')
+                await asyncio.sleep(2)
+                logger.info("  公告弹窗已关闭，重新导航到费用管理页")
+                # 重新导航到费用管理页
+                if not await navigate_to_fee_mgmt(page):
+                    raise Exception("关闭公告后重新导航费用管理页失败")
+        except Exception as e:
+            if "关闭公告后" in str(e):
+                raise
+            pass
+
+        # 1. 强制点击「导入费用」按钮（force=True跳过遮挡检测）
         clicked = False
         for btn_text in ['导入费用', 'Import Expense']:
             try:
@@ -194,7 +232,7 @@ async def upload_single_file(page, filepath: str, file_index: int, total: int) -
                 cnt = await btn.count()
                 logger.info(f"  找到 {cnt} 个'{btn_text}'按钮")
                 if cnt > 0:
-                    await btn.first.click(timeout=ACTION_TIMEOUT)
+                    await btn.first.click(force=True, timeout=ACTION_TIMEOUT)
                     logger.info(f"  已点击: {btn_text}")
                     clicked = True
                     break
